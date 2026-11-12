@@ -40,3 +40,14 @@ class SourceTests(unittest.TestCase):
         status, _, body = self.get('/oai?verb=ListRecords&resumptionToken=next%2B1')
         self.assertEqual(status, 200)
         self.assertIn(b'badResumptionToken', body)
+
+    def test_window_endpoints_and_precision(self):
+        self.assertIn(b'noRecordsMatch', self.get('/oai?verb=ListRecords&from=2026-11-01&until=2026-11-01')[2])
+        self.assertIn(b'report:7', self.get('/oai?verb=ListRecords&from=2026-11-02&until=2026-11-02')[2])
+        self.assertIn(b'badArgument', self.get('/oai?verb=ListRecords&from=invalid')[2])
+        self.assertIn(b'YYYY-MM-DDThh:mm:ssZ', self.get('/partner/oai?verb=Identify')[2])
+
+    def test_identifiers_have_headers_not_metadata(self):
+        body = self.get('/oai?verb=ListIdentifiers')[2]
+        self.assertIn(b'ListIdentifiers', body)
+        self.assertNotIn(b'metadata', body)
