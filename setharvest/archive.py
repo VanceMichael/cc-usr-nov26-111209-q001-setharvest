@@ -5,6 +5,33 @@ import tempfile
 from pathlib import Path
 
 
+def write_object(objects, body):
+    digest = hashlib.sha256(body).hexdigest()
+    destination = Path(objects) / digest
+    if destination.exists():
+        if destination.read_bytes() != body:
+            raise ValueError('原文对象校验失败')
+    else:
+        descriptor, temporary = tempfile.mkstemp(prefix='.receive-', dir=objects)
+        try:
+            with os.fdopen(descriptor, 'wb') as stream:
+                stream.write(body)
+                stream.flush()
+                os.fsync(stream.fileno())
+            os.replace(temporary, destination)
+        finally:
+            if os.path.exists(temporary):
+                os.unlink(temporary)
+    return digest
+
+
+def read_object(objects, digest):
+    body = (Path(objects) / digest).read_bytes()
+    if hashlib.sha256(body).hexdigest() != digest:
+        raise ValueError('原文摘要不匹配')
+    return body
+
+
 class Archive:
     def __init__(self, database, objects):
         self.objects = Path(objects)
@@ -21,22 +48,7 @@ class Archive:
         """)
 
     def save(self, url, status, content_type, body):
-        digest = hashlib.sha256(body).hexdigest()
-        destination = self.objects / digest
-        if destination.exists():
-            if destination.read_bytes() != body:
-                raise ValueError('原文对象校验失败')
-        else:
-            descriptor, temporary = tempfile.mkstemp(prefix='.receive-', dir=self.objects)
-            try:
-                with os.fdopen(descriptor, 'wb') as stream:
-                    stream.write(body)
-                    stream.flush()
-                    os.fsync(stream.fileno())
-                os.replace(temporary, destination)
-            finally:
-                if os.path.exists(temporary):
-                    os.unlink(temporary)
+        digest = write_object(self.objects, body)
         with self.connection:
             cursor = self.connection.execute(
                 'insert into captures(url,status,content_type,digest,size) values(?,?,?,?,?)',
@@ -48,10 +60,7 @@ class Archive:
         row = self.connection.execute('select digest from captures where id=?', (capture_id,)).fetchone()
         if row is None:
             raise KeyError(capture_id)
-        body = (self.objects / row[0]).read_bytes()
-        if hashlib.sha256(body).hexdigest() != row[0]:
-            raise ValueError('原文摘要不匹配')
-        return body
+        return read_object(self.objects, row[0])
 
     def rows(self):
         self.connection.row_factory = sqlite3.Row
